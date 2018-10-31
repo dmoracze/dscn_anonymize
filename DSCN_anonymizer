@@ -1,0 +1,226 @@
+#!/bin/tcsh
+# This shell script will de-face and de-identify structural and functional data
+# FSL and AFNI must be in you path
+# Author: Dustin Moraczewski
+
+# subject IDs
+set subj 	= (RED_CAT_118 RED_CAT_120 RED_CAT_123 RED_CAT_124 RED_CAT_127 RED_CAT_133 RED_CAT_134 RED_CAT_135)
+
+#RED_CAT_107 RED_CAT_118 RED_CAT_120 RED_CAT_123 RED_CAT_124 RED_CAT_127 RED_CAT_132 RED_CAT_133 RED_CAT_134 RED_CAT_135 RED_CAT_139 RED_CAT_140 RED_CAT_142 RED_CAT_144 RED_CAT_145 RED_CAT_149 RED_CAT_224 RED_CAT_226 RED_CAT_229 RED_CAT_230 RED_CAT_237
+
+# done: RED_CAT_104 RED_CAT_108 RED_CAT_109 RED_CAT_110 RED_CAT_111 RED_CAT_115 RED_CAT_106 RED_CAT_117 RED_CAT_205 RED_CAT_206 RED_CAT_207 RED_CAT_212 RED_CAT_216 RED_CAT_217 RED_CAT_218 RED_CAT_220
+
+# RED_CAT_112 RED_CAT_116 RED_CAT_104 RED_CAT_108 RED_CAT_109 RED_CAT_110 RED_CAT_111 RED_CAT_115 RED_CAT_106 RED_CAT_117 RED_CAT_205 RED_CAT_206 RED_CAT_207 RED_CAT_212 RED_CAT_216 RED_CAT_217 RED_CAT_218 RED_CAT_220
+# 
+# Do you want to run this on study A?
+set A 		= no
+# study ID A and run identifiers
+set studyA 	= CHT
+set runsA 	= (T1 CHT_1 CHT_2 CHT_3 CHT_4)
+
+# Do you want to run this on study B?
+set B 		= yes
+# study ID B and run identifiers
+set studyB 	= CMNT
+set runsB 	= (T1 cmnt1 cmnt2 cmnt3 cmnt4)
+
+# top directory (study ID will be used to descend into file structure)
+set data_dir 	= /export/data/brain1/
+
+# output directory (study ID will be used as well)
+set out 	= /export/data/brain1/CAT_anonymized/image03
+
+set overwrite 	= no # overwrite previous? Be careful!
+
+#<><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><>
+#<><><><><><><><><><><><><><><> Do Not Change  <><><><><><><><><><><><><><><><><>
+#<><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><><>
+
+# check that data directory exists
+echo "Checking your directories..."
+echo " "
+if (! -d $data_dir) then
+	echo " "
+	echo "Data directory does not exist, script failing..."
+	echo "It's a trap! - Admiral Ackbar"
+	echo " "
+	exit
+else
+	cd $data_dir
+	if (! -d $out) then 
+		echo "Output directory does not exist."
+		echo "Its ok, I'll create it for you."
+		echo " "
+		mkdir -p $out
+		echo "You're welcome, but you owe me a new hard drive."
+	endif
+endif
+# Study A
+if ($A == yes) then
+	# Subject loop
+	foreach s ($subj)
+		echo " "
+		echo "=========================================="
+		echo "Processing: $s $studyA"
+		echo " "
+		# check for the bold folder
+		if (-d $data_dir/$studyA/$s/bold) then 
+			# check for the existence of original and complete files
+			echo "Checking runs..."
+			set c_runs = () # current runs
+			set d_runs = () # done runs
+			set m_runs = () # missing runs
+			foreach r ($runsA)
+				if (-f $data_dir/$studyA/$s/bold/${s}_$r+orig.HEAD) then
+					if ($r == "T1") then
+						if (-f $out/$s/${s}_T1_${studyA}_new_defaced.nii.gz) then
+							set d_runs = ($d_runs $r)
+						else
+							set c_runs = ($c_runs $r)
+						endif
+					else
+						if (-f $out/$s/${s}_${r}_new.nii.gz) then
+							set d_runs = ($d_runs $r)
+						else
+							set c_runs = ($c_runs $r)
+						endif
+					endif
+				else
+					set m_runs = ($m_runs $r)
+				endif
+			end
+			if ($#c_runs != 0) then
+				# make output directory
+				if ($overwrite == yes) rm -rf $out/$s
+				if (! -d $out/$s) mkdir -p $out/$s
+				cd $data_dir/$studyA/$s/bold
+				# convert to NIFI
+				echo "Converting files to NIFIT..."
+				foreach r ($c_runs)
+					echo " "
+					echo "  $r"
+					echo " "
+					3dAFNItoNIFTI -prefix $out/$s/${s}_$r.nii.gz ${s}_$r+orig
+				end
+				echo " "
+				echo "Conversion done!"
+				echo " "
+				# anonymize
+				echo "Anonymizing..."
+				cd $out/$s
+				cp /export/software/brain/Templates/MNI152_T1_1mm_brain.nii.gz .
+				cp /export/software/brain/Templates/facemask_mni.nii.gz .
+				foreach r ($c_runs)
+					echo " "
+					echo "run: $r"
+					echo " "
+					if ($r == "T1") then
+						set struct = yes
+					else
+						set struct = no
+					endif
+					NiftiAnonymizer.sh ${s}_$r.nii.gz $struct
+				end
+				rm -f ./MNI152_T1_1mm_brain.nii.gz ./facemask_mni.nii.gz
+				foreach r ($runsA)
+					rm -f ${s}_$r.nii.gz
+					if ($r == "T1") then
+						rm -f ${s}_T1_new.nii.gz
+						mv ${s}_T1_new_defaced.nii.gz ${s}_T1_${studyA}_new_defaced.nii.gz
+					endif
+				end
+			else
+				echo "No runs to process!"
+			endif
+		else 
+			echo "Cannot find bold folder, moving on..."
+		endif
+	end
+endif
+# Study B
+if ($B == yes) then
+	# Subject loop
+	foreach s ($subj)
+		echo " "
+		echo "=========================================="
+		echo "Processing: $s $studyB"
+		echo " "
+		# check for the bold folder
+		if (-d $data_dir/$studyB/$s/bold) then 
+			# check for the existence of original and complete files
+			echo "Checking runs..."
+			set c_runs = () # current runs
+			set d_runs = () # done runs
+			set m_runs = () # missing runs
+			foreach r ($runsB)
+				if (-f $data_dir/$studyB/$s/bold/${s}_$r+orig.HEAD) then
+					if ($r == "T1") then
+						if (-f $out/$s/${s}_T1_${studyB}_new_defaced.nii.gz) then
+							set d_runs = ($d_runs $r)
+						else
+							set c_runs = ($c_runs $r)
+						endif
+					else
+						if (-f $out/$s/${s}_${r}_new.nii.gz) then
+							set d_runs = ($d_runs $r)
+						else
+							set c_runs = ($c_runs $r)
+						endif
+					endif
+				else
+					set m_runs = ($m_runs $r)
+				endif
+			end
+			if ($#c_runs != 0) then
+				# make output directory
+				if (! -d $out/$s) mkdir -p $out/$s
+				cd $data_dir/$studyB/$s/bold
+				# convert to NIFI
+				echo "Converting files to NIFIT..."
+				foreach r ($c_runs)
+					echo " "
+					echo "  $r"
+					echo " "
+					3dAFNItoNIFTI -prefix $out/$s/${s}_$r.nii.gz ${s}_$r+orig
+				end
+				echo " "
+				echo "Conversion done!"
+				echo " "
+				# anonymize
+				echo "Anonymizing..."
+				cd $out/$s
+				cp /export/software/brain/Templates/MNI152_T1_1mm_brain.nii.gz .
+				cp /export/software/brain/Templates/facemask_mni.nii.gz .
+				foreach r ($c_runs)
+					echo " "
+					echo "run: $r"
+					echo " "
+					if ($r == "T1") then
+						set struct = yes
+					else
+						set struct = no
+					endif
+					NiftiAnonymizer.sh ${s}_$r.nii.gz $struct
+				end
+				rm -f ./MNI152_T1_1mm_brain.nii.gz ./facemask_mni.nii.gz
+				foreach r ($runsB)
+					rm -f ${s}_$r.nii.gz
+					if ($r == "T1") then
+						rm -f ${s}_T1_new.nii.gz
+						mv ${s}_T1_new_defaced.nii.gz ${s}_T1_${studyB}_new_defaced.nii.gz
+					endif
+				end
+			else
+				echo "No runs to process!"
+			endif
+		else 
+			echo "Cannot find bold folder, moving on..."
+		endif
+	end
+endif
+echo " "
+echo "================================================"
+echo "These are not the droids you are looking for..."
+echo "================================================"
+echo " "
+exit
